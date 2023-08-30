@@ -1,0 +1,164 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+
+const char* ssid = "SSID";
+const char* password = "password";
+
+ESP8266WebServer server(80);
+
+const int contactSensorPin = D2;
+const int led1Pin = D3;
+const int led2Pin = D4;
+
+bool contactSensorState = HIGH;
+bool lastContactSensorState = HIGH;
+bool led1State = LOW;
+bool led2State = LOW;
+unsigned long led2StartTime = 0;
+const unsigned long led2Duration = 10000;
+const unsigned long debounceDelay = 50;
+
+bool toggleButtonState = false;
+bool manualLed2Control = false; // Flag for controlling LED 2 manually
+
+void handleRoot() {
+  String content = "<!DOCTYPE html><html><head>";
+  content += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+  content += "<style>";
+  content += "body { font-family: Arial, sans-serif; background-color: #f4f4f4; }";
+  content += ".container { max-width: 400px; margin: 0 auto; padding: 20px; background-color: #ffffff; box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2); }";
+  content += "h1 { color: #333; text-align: left; }";
+  content += ".toggle-container { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; }";
+  content += ".toggle-label { flex: 1; color: #555; }";
+  content += ".switch { position: relative; display: inline-block; width: 50px; height: 30px; background-color: #ccc; border-radius: 15px; cursor: pointer; }";
+  content += ".switch input { display: none; }";
+  content += ".slider { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: #2196F3; border-radius: 15px; transition: 0.4s; }";
+  content += "input:checked + .slider { transform: translateX(20px); }";
+  content += "</style>";
+  content += "<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js'></script>";
+  content += "<script>";
+  content += "function toggleLed2() {";
+  content += "$.get('/toggle', function(data) {";
+  content += "});";
+  content += "}";
+  content += "setInterval(function() {";
+  content += "$.get('/status', function(data) {";
+  content += "$('#status').html(data);";
+  content += "});";
+  content += "}, 1000);";
+  content += "</script>";
+  content += "</head><body>";
+  content += "<div class='container'>";
+  content += "<h1>Access Control Emulator</h1>";
+  content += "<div id='status'>";
+  content += "Loading...";
+  content += "</div>";
+  content += "<div class='toggle-container'>";
+  content += "<span class='toggle-label'>Open/Close Door</span>";
+  content += "<label class='switch'>";
+  content += "<input type='checkbox' onclick='toggleLed2()'>";
+  content += "<span class='slider'></span>";
+  content += "</label>";
+  content += "</div>";
+  content += "</div>";
+  content += "</body></html>";
+  server.send(200, "text/html", content);
+}
+
+
+void handleStatus() {
+  String status = "<div style='color: red; display: inline-block; width: 20px; height: 20px; border-radius: 100%; background-color: " + String(contactSensorState == LOW ? "green" : "red") + "'></div>";
+  status += "Door Status: " + String(contactSensorState == LOW ? "DOOR UNLOCKED" : "DOOR LOCKED") + "<br>";
+  
+  status += "<div style='color: black; display: inline-block; width: 20px; height: 20px; border-radius: 100%; background-color: " + String(led1State == HIGH ? "blue" : "black") + "'></div>";
+  status += "Door LED Status: " + String(led1State == HIGH ? "ON" : "OFF") + "<br>";
+
+  status += "<div style='color: " + String(led2State == HIGH ? "red" : "green") + "; display: inline-block; width: 20px; height: 20px; border-radius: 100%; background-color: " + String(led2State == HIGH ? "red" : "green") + "'></div>";
+  status += "Door Contact: " + String(led2State == HIGH ? "DOOR OPEN" : "DOOR CLOSED") + "<br>";
+
+  status += "<div style='color: " + String(led2State == HIGH ? "blue" : "black") + "; display: inline-block; width: 20px; height: 20px; border-radius: 100%; background-color: " + String(led2State == HIGH ? "blue" : "black") + "'></div>";
+  status += "Door Contact LED Status: " + String(led2State == HIGH ? "ON" : "OFF") + "<br>";
+
+  server.send(200, "text/html", status);
+}
+
+void handleToggle() {
+  if (!toggleButtonState) {
+    toggleButtonState = true;
+    digitalWrite(led2Pin, HIGH);
+    led2State = HIGH;
+    led2StartTime = millis();
+    manualLed2Control = true; // Set the manual control flag
+    Serial.println("Door Contact: DOOR OPEN");
+    server.send(200, "text/plain", "Toggled LED 2 ON");
+  } else {
+    toggleButtonState = false;
+    manualLed2Control = false; // Reset the manual control flag
+    server.send(200, "text/plain", "Toggled LED 2 OFF");
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(contactSensorPin, INPUT_PULLUP);
+  pinMode(led1Pin, OUTPUT);
+  pinMode(led2Pin, OUTPUT);
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi");
+
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/status", HTTP_GET, handleStatus);
+  server.on("/toggle", HTTP_GET, handleToggle);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+
+  int newContactSensorState = digitalRead(contactSensorPin);
+
+  if (newContactSensorState != lastContactSensorState) {
+    delay(debounceDelay);
+    newContactSensorState = digitalRead(contactSensorPin);
+  }
+
+  if (newContactSensorState != contactSensorState) {
+    contactSensorState = newContactSensorState;
+    Serial.print("Door Status: ");
+    Serial.println(contactSensorState == LOW ? "DOOR UNLOCKED" : "DOOR LOCKED");
+
+    if (contactSensorState == LOW) {
+      digitalWrite(led1Pin, HIGH);
+      led1State = HIGH;
+      Serial.println("Door LED Status: ON");
+
+      if (!toggleButtonState && !manualLed2Control) {
+        digitalWrite(led2Pin, HIGH);
+        led2State = HIGH;
+        led2StartTime = millis();
+        Serial.println("Door Contact: DOOR OPEN");
+      }
+    }
+  }
+
+  if (contactSensorState == HIGH && led1State == HIGH) {
+    digitalWrite(led1Pin, LOW);
+    led1State = LOW;
+    Serial.println("Door LED Status: OFF");
+  }
+
+  if (led2State == HIGH && (millis() - led2StartTime >= led2Duration)) {
+    if (!manualLed2Control) { // Only turn off if not manually controlled
+      digitalWrite(led2Pin, LOW);
+      led2State = LOW;
+      Serial.println("Door Contact: DOOR CLOSED");
+    }
+  }
+
+  lastContactSensorState = newContactSensorState;
+}
