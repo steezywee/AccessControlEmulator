@@ -9,6 +9,7 @@ ESP8266WebServer server(80);
 const int contactSensorPin = D2;
 const int led1Pin = D3;
 const int led2Pin = D4;
+const int contactOutLedPin = D5; 
 
 bool contactSensorState = HIGH;
 bool lastContactSensorState = HIGH;
@@ -103,6 +104,7 @@ void setup() {
   pinMode(contactSensorPin, INPUT_PULLUP);
   pinMode(led1Pin, OUTPUT);
   pinMode(led2Pin, OUTPUT);
+  pinMode(contactOutLedPin, OUTPUT);
 
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
@@ -121,6 +123,8 @@ void loop() {
   server.handleClient();
 
   int newContactSensorState = digitalRead(contactSensorPin);
+
+  digitalWrite(contactOutLedPin, led2State);
 
   if (newContactSensorState != lastContactSensorState) {
     delay(debounceDelay);
